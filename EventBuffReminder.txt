@@ -3,7 +3,7 @@
 ## SavedVariables: EventBuffReminderVariables
 ## Description: Puts a reminder on the screen when your event xp buff runs out.
 ## IsLibrary: false
-## Version: 1
+## Version: 2
 ## Author: bluebuiy
 ## DependsOn: LibAddonMenu-2.0
 

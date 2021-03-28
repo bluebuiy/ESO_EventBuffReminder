@@ -1,6 +1,6 @@
 --[[ 
     Author: @bluebuiy
-    
+
     How to add a new buff
 
     1. Find the collectible id (https://esoitem.uesp.net/viewlog.php?record=collectibles) and add it to EBRAddon.collectible_table
@@ -22,6 +22,7 @@ EBRAddon = {}
 EBRAddon.name = "EventBuffReminder"
 EBRAddon.has_buff = false
 EBRAddon.fragment = nil
+EBRAddon.apply_buff_soon = false
 
 -- =======================
 --     Start data
@@ -136,6 +137,13 @@ function EBR_HideRefreshControl()
     SCENE_MANAGER:GetScene("hud"):RemoveFragment(EBRAddon.fragment)
 end
 
+EBRAddon.OnCombatState = function(event, inCombat)
+    if (inCombat == false and EBRAddon.apply_buff_soon) then
+        zo_callLater(EBR_ShowRefreshControl, 10)
+        --EBR_ShowRefreshControl()
+        EBRAddon.apply_buff_soon = false
+    end
+end
 
 EBRAddon.OnEffectChange = function(event,  changeType, effectSlot, effectName, unitTag, beginTime, endTime, stackCount, iconName, buffType, effectType, abilityType, statusEffectType, unitName, unitId, abilityId, sourceType)
     
@@ -158,10 +166,24 @@ EBRAddon.OnEffectChange = function(event,  changeType, effectSlot, effectName, u
         end
 
     end
+
+    if (unitTag ~= "player") then
+        --d("Recieved non-player?")
+        return
+    end
+
+    if (EBRAddon.buffs[abilityId] ~= true) then
+        --d("Recieved non care ability?")
+        return
+    end
     
     if (changeType == EFFECT_RESULT_FADED) then
         EBRAddon.has_buff = false
-        EBR_ShowRefreshControl()
+        if (IsUnitInCombat("player")) then
+            EBRAddon.apply_buff_soon = true
+        else
+            EBR_ShowRefreshControl()
+        end
     end
 
     if (changeType == EFFECT_RESULT_GAINED) then
@@ -176,12 +198,16 @@ end
 
 function EBRAddon:Initialize()
 
+
+    EVENT_MANAGER:RegisterForEvent(self.name, EVENT_PLAYER_COMBAT_STATE, self.OnCombatState)
+
+    -- filters being weird. putting multiple filters on this event isn't working how I expect and how it's documented in esoui.  Just filtering to player for now then.
     EVENT_MANAGER:RegisterForEvent(self.name, EVENT_EFFECT_CHANGED, self.OnEffectChange)
     EVENT_MANAGER:AddFilterForEvent(self.name, EVENT_EFFECT_CHANGED, REGISTER_FILTER_UNIT_TAG, "player")
 
-    for i, k in ipairs(EBRAddon.buffs) do
-        EVENT_MANAGER:AddFilterForEvent(self.name, EVENT_EFFECT_CHANGED, REGISTER_FILTER_ABILITY_ID, i)
-    end
+    --for i, k in ipairs(EBRAddon.buffs) do
+    --    EVENT_MANAGER:AddFilterForEvent(self.name, EVENT_EFFECT_CHANGED, REGISTER_FILTER_ABILITY_ID, i)
+    --end
 
     EBRAddon.fragment = ZO_SimpleSceneFragment:New(EventBuffReminderControl)
 
@@ -205,20 +231,25 @@ function EBRAddon:Initialize()
 
     EBR_HideRefreshControl()
 
-    -- get initial buff status, toggle alert if needed
-    for i = 1, GetNumBuffs("player") do
-        local buffName, startTime, endTime, buffSlot, stackCount, iconFile, buffType, effectType, abilityType, statusEffectType, abilityId = GetUnitBuffInfo("player", i)
 
-        if (EBRAddon.buffs[abilityId] == true) then
-            EBRAddon.has_buff = true
+    local f = function()
+
+        -- get initial buff status, toggle alert if needed
+        for i = 1, GetNumBuffs("player") do
+            local buffName, startTime, endTime, buffSlot, stackCount, iconFile, buffType, effectType, abilityType, statusEffectType, abilityId = GetUnitBuffInfo("player", i)
+
+            if (EBRAddon.buffs[abilityId] == true) then
+                EBRAddon.has_buff = true
+            end
+
         end
 
+        if (EBRAddon.has_buff ~= true) then
+            EBR_ShowRefreshControl()
+        end
     end
 
-    if (EBRAddon.has_buff ~= true) then
-        EBR_ShowRefreshControl()
-        --d("buff not detected")
-    end
+    zo_callLater(f, 10)
 
 
     EBRAddon:CreateSettings()
