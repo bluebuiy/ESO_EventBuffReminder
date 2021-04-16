@@ -15,8 +15,6 @@
 ]]
 
 
-
-
 EBRAddon = {}
 
 EBRAddon.name = "EventBuffReminder"
@@ -29,27 +27,27 @@ EBRAddon.apply_buff_soon = false
 
 EBRAddon.collectible_table = {
     [1] = 1167 -- jester's pie of misrule
-    -- [2] = 479 -- witchmother's wistle
-    -- etc
+    --[2] = 0 -- anniversary cake must be manually eaten
 }
 
 EBRAddon.setting_event_table = {
-    "Jester"
-    -- "Witchmother"
+    "Jester",
+    "Anniversary"
 }
 
 EBRAddon.setting_event_index_converter = {
-    [1] = "Jester"
-    -- [2] = "Witchmother"
+    [1] = "Jester",
+    [2] = "Anniversary"
 }
 
 EBRAddon.setting_event_name_converter = {
-    ["Jester"] = 1
-    -- ["Witchmother"] = 2
+    ["Jester"] = 1,
+    ["Anniversary"] = 2
 }
 
 EBRAddon.buffs = {
-    [91369] = true -- jester
+    [91369] = true, -- jester
+    [152514] = true -- anniversary
 }
 
 
@@ -60,11 +58,29 @@ EBRAddon.buffs = {
 
 
 
+EBRAddon.SetAutoApplyOptionFunc = function(value)
+    EBRAddon.saved_variables.AutoReapplyBuff = value
+    if (value == true and EBRAddon.has_buff ~= true) then
+        EBR_ShowRefreshControl() 
+    end
 
+    if (value == false and EBRAddon.has_buff ~= true and EBRAddon.saved_variables.ShowingAlert == false) then
+        EBR_HideRefreshControl()
+    end
+end
 
+EBRAddon.SetShowNotificationOptionFunc = function(value)
+    EBRAddon.saved_variables.ShowingAlert = value
 
+    if (value == true and EBRAddon.has_buff ~= true) then
+        EBR_ShowRefreshControl()
+    end
 
+    if (value == false and (EBRAddon.saved_variables.AutoReapplyBuff == false or type(EBRAddon.collectible_table[EBRAddon.saved_variables.CurrentEvent]) == "number")) then
+        EBR_HideRefreshControl()
+    end
 
+end
 
 EBRAddon.CreateSettings = function()
     local LAM = LibAddonMenu2
@@ -75,31 +91,35 @@ EBRAddon.CreateSettings = function()
         author = "@bluebuiy"
     }
     local panel = LAM:RegisterAddonPanel("EventBuffReminderPanel", panelData)
-
-    local EventObject = {"Jester"}
-
+    
 
     local optionsData = {
         {
+            type = "description",
+            text = "Hover over each option for a description."
+        },
+        {
             type = "checkbox",
             name = "Auto-apply buff",
+            tooltip = "If the addon should automatically reapply the buff.  If the buff cannot be applied automatically and this setting is on, a notification will ALWAYS show.",
             getFunc = function() return EBRAddon.saved_variables.AutoReapplyBuff end,
-            setFunc = function(value) EBRAddon.saved_variables.AutoReapplyBuff = value if (value == true and EBRAddon.has_buff ~= true) then EBR_ShowRefreshControl() end end,
+            setFunc = EBRAddon.SetAutoApplyOptionFunc,
             text = "Auto use the buff."
         },
         {
             type = "checkbox",
             name = "Show notification",
+            tooltip = "If a buff that can be automatically reapplied should show a notification.",
             getFunc = function() return EBRAddon.saved_variables.ShowingAlert end,
-            setFunc = function(value) EBRAddon.saved_variables.ShowingAlert = value end
+            setFunc = EBRAddon.SetShowNotificationOptionFunc
         },
         {
             type = "dropdown",
             name = "Current Event",
             choices = EBRAddon.setting_event_table,
             getFunc = function() return EBRAddon.setting_event_index_converter[EBRAddon.saved_variables.CurrentEvent] end,
-            setFunc = function(value) EBRAddon.saved_variables.CurrentEvent = EBRAddon.setting_event_name_converter[value] end,
-            text = "Set which event is currently active.  Unfortunately it's not possible to detect which event is currently running."
+            setFunc = function(value) EBRAddon.saved_variables.CurrentEvent = EBRAddon.setting_event_name_converter[value] if (EBRAddon.has_buff ~= true) then EBR_ShowRefreshControl() end end,
+            tooltip = "Set which event is currently active.  Unfortunately it's not possible to detect which event is currently running."
         },
         {
             type = "description",
@@ -118,10 +138,40 @@ function EBRAddon:OnAddOnLoaded(addonName)
 end
 
 function EBR_ShowRefreshControl()
-    if (EBRAddon.saved_variables.AutoReapplyBuff) then
+    local hasCollectible = type(EBRAddon.collectible_table[EBRAddon.saved_variables.CurrentEvent]) == "number"
+
+    -- because we show the alert if the current event cannot be automatically reapplied, we have to check beforehand if we don't want to do anything.
+    if (EBRAddon.saved_variables.AutoReapplyBuff == false and EBRAddon.saved_variables.ShowingAlert == false) then
+        return
+    end
+
+    -- actually do something.
+    if (EBRAddon.saved_variables.AutoReapplyBuff and hasCollectible) then
         UseCollectible(EBRAddon.collectible_table[EBRAddon.saved_variables.CurrentEvent])
+        -- check the buff was actually applied
+        zo_callLater(function()
+            local buffPrescence = false
+            for i = 1, GetNumBuffs("player") do
+                local buffName, startTime, endTime, buffSlot, stackCount, iconFile, buffType, effectType, abilityType, statusEffectType, abilityId = GetUnitBuffInfo("player", i)
+    
+                if (EBRAddon.buffs[abilityId] == true) then
+                    buffPrescence = true
+                    break
+                end
+            end
+            if (buffPrescence == false) then
+                -- show the notification if we failed to apply the buff.
+                -- only show this error notification if we want some kind of behavior, either showing notification or auto-reapply.
+                if (EBRAddon.saved_variables.AutoReapplyBuff == true or EBRAddon.saved_variables.ShowingAlert == true) then
+                    EventBuffReminderControl:SetHidden(false)
+                    
+                    SCENE_MANAGER:GetScene("hudui"):AddFragment(EBRAddon.fragment)
+                    SCENE_MANAGER:GetScene("hud"):AddFragment(EBRAddon.fragment)
+                end
+            end
+        end, 5000)
     else
-        if (EBRAddon.saved_variables.ShowingAlert) then
+        if (hasCollectible == false or EBRAddon.saved_variables.ShowingAlert) then
             EventBuffReminderControl:SetHidden(false)
             
             SCENE_MANAGER:GetScene("hudui"):AddFragment(EBRAddon.fragment)
@@ -219,10 +269,19 @@ function EBRAddon:Initialize()
         end
     end
 
+    SLASH_COMMANDS["/ebr_manref"] = function()
+        EBR_ShowRefreshControl()
+    end
+
+    SLASH_COMMANDS["/ebr_manhide"] = function()
+        EBR_HideRefreshControl()
+    end
+
     local defaults = {
         ShowingAlert = true,
         AutoReapplyBuff = false,
-        CurrentEvent = 1
+        BehaviorEnabled = true,
+        CurrentEvent = 2
     }
 
     self.saved_variables = ZO_SavedVars:NewAccountWide("EventBuffReminderVariables", 1, nil, defaults)
